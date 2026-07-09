@@ -42,8 +42,18 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    env_file:
-      - .env
+    # Variabile explicite (nu `env_file`): containerul aplicației nu trebuie să
+    # primească parola de root a bazei de date sau credențialele de seed.
+    # Valorile vin din `.env`, citit automat de Docker Compose.
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:?lipsește DATABASE_URL}
+      AUTH_SECRET: ${AUTH_SECRET:?lipsește AUTH_SECRET}
+      AUTH_URL: ${AUTH_URL:?lipsește AUTH_URL}
+      AUTH_TRUST_HOST: "true"
+      SOCKET_ALLOWED_ORIGINS: ${SOCKET_ALLOWED_ORIGINS:?lipsește SOCKET_ALLOWED_ORIGINS}
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
     expose:
       - "3000"
     networks:

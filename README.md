@@ -173,10 +173,11 @@ docker compose -f compose.prod.yml up -d --build
 
 Migrațiile Prisma se aplică automat la fiecare pornire (vezi
 `docker/entrypoint.sh`). Seed-ul se rulează **o singură dată**, la prima
-instalare:
+instalare, într-un container temporar care primește și variabilele `SEED_*`:
 
 ```bash
-docker compose -f compose.prod.yml exec app npx tsx prisma/seed.ts
+docker compose -f compose.prod.yml run --rm --env-file .env \
+  --entrypoint npx app tsx prisma/seed.ts
 ```
 
 > Rulează **o singură instanță** a aplicației, obligatoriu pentru Socket.io
