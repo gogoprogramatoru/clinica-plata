@@ -1,0 +1,61 @@
+# Stack de producție pentru Clinica Plata (VPS Hetzner).
+#
+# Rețele:
+#   internal — privată acestui stack; DOAR aplicația și MySQL o văd.
+#   proxy    — rețeaua existentă a lui Caddy (`n8n_internal`, declarată extern).
+#              Caddy rezolvă containerul după nume (`clinica-app`) și îi face
+#              reverse proxy pe portul 3000. Nu publicăm niciun port pe host:
+#              singura cale către aplicație trece prin Caddy, peste HTTPS.
+#
+# MySQL este atașat DOAR la `internal`, deci nu e accesibil nici din internet,
+# nici din containerele n8n.
+
+name: clinica-plata
+
+services:
+  db:
+    image: mysql:8.0
+    container_name: clinica-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?lipsește MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?lipsește MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER:?lipsește MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?lipsește MYSQL_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - internal
+
+  app:
+    build:
+      context: .
+    image: clinica-plata:latest
+    container_name: clinica-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    expose:
+      - "3000"
+    networks:
+      - internal
+      - proxy
+
+networks:
+  internal:
+    driver: bridge
+  proxy:
+    external: true
+    name: n8n_internal
+
+volumes:
+  mysql_data:

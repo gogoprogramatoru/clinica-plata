@@ -1,0 +1,32 @@
+# MySQL pentru development local. NU e pentru producție.
+# Pornire:  docker compose up -d
+# Oprire:   docker compose down        (păstrează datele)
+# Reset:    docker compose down -v      (șterge datele)
+services:
+  db:
+    image: mysql:8
+    container_name: clinica-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root_dev
+      MYSQL_DATABASE: clinica_plata
+      MYSQL_USER: clinica
+      MYSQL_PASSWORD: parola_puternica
+    ports:
+      # Host 3307 -> container 3306. Folosim 3307 ca să evităm conflictul cu un
+      # eventual MySQL nativ care ascultă deja pe 3306 pe macOS.
+      # DATABASE_URL din .env trebuie să folosească portul 3307.
+      - "3307:3306"
+    volumes:
+      - clinica_mysql_data:/var/lib/mysql
+      # Acordă drepturi globale userului `clinica` (necesar pentru shadow DB la
+      # `prisma migrate dev`). Rulat doar la prima inițializare a volumului.
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-proot_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  clinica_mysql_data:

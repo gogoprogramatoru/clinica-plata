@@ -1,0 +1,146 @@
+// Prisma schema — Clinica Plata
+// Principiu cheie: prețul unei linii de tichet (TicketItem.price) este un
+// "snapshot" salvat la momentul creării. Modificarea ulterioară a
+// Procedure.defaultPrice NU alterează tichetele istorice.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  RECEPTION
+  NURSE
+  ADMIN
+}
+
+enum TicketStatus {
+  PENDING
+  PAID
+}
+
+/// Conturi de utilizator. Asistentele (NURSE) sunt legate de o specialitate.
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  passwordHash String
+  role         Role
+  active       Boolean  @default(true)
+
+  // Doar pentru NURSE: leagă contul de specialitatea în care lucrează.
+  specialtyId String?
+  specialty   Specialty? @relation("SpecialtyNurses", fields: [specialtyId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Audit trail
+  createdTickets Ticket[] @relation("TicketCreatedBy")
+  paidTickets    Ticket[] @relation("TicketPaidBy")
+
+  @@index([specialtyId])
+  @@index([role])
+}
+
+/// Specialitate medicală (ex. Cardiologie). Grupează medici, proceduri, asistente.
+model Specialty {
+  id     String  @id @default(cuid())
+  name   String  @unique
+  active Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  doctors    Doctor[]
+  procedures Procedure[]
+  nurses     User[]      @relation("SpecialtyNurses")
+  tickets    Ticket[]
+}
+
+/// Medic asignat unei specialități.
+model Doctor {
+  id          String    @id @default(cuid())
+  name        String
+  active      Boolean   @default(true)
+  specialtyId String
+  specialty   Specialty @relation(fields: [specialtyId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tickets Ticket[]
+
+  @@index([specialtyId])
+}
+
+/// Procedură cu preț implicit, asignată unei specialități.
+model Procedure {
+  id           String    @id @default(cuid())
+  name         String
+  // Decimal(10,2): valori până la 99.999.999,99 — suficient pentru prețuri clinice.
+  defaultPrice Decimal   @db.Decimal(10, 2)
+  active       Boolean   @default(true)
+  specialtyId  String
+  specialty    Specialty @relation(fields: [specialtyId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  ticketItems TicketItem[]
+
+  @@index([specialtyId])
+}
+
+/// Tichet / fișă pacient. Totalul = suma TicketItem.price (calculat la nevoie).
+model Ticket {
+  id           String       @id @default(cuid())
+  patientName  String
+  status       TicketStatus @default(PENDING)
+  observations String?      @db.Text
+
+  // Pacient asigurat CAS: procedurile sunt înregistrate (cu prețuri, pentru
+  // evidența clinicii), dar pacientul NU plătește nimic (decontează CAS).
+  isInsuredCAS Boolean @default(false)
+
+  specialtyId String
+  specialty   Specialty @relation(fields: [specialtyId], references: [id], onDelete: Restrict)
+
+  doctorId String?
+  doctor   Doctor? @relation(fields: [doctorId], references: [id], onDelete: SetNull)
+
+  createdByUserId String
+  createdBy       User   @relation("TicketCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  paidByUserId String?
+  paidBy       User?   @relation("TicketPaidBy", fields: [paidByUserId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime  @default(now())
+  paidAt    DateTime?
+
+  items TicketItem[]
+
+  @@index([status, createdAt])
+  @@index([specialtyId])
+  @@index([paidAt])
+}
+
+/// Linie de procedură pe tichet. name & price sunt snapshot-uri la momentul creării.
+model TicketItem {
+  id       String @id @default(cuid())
+  ticketId String
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  // null pentru proceduri custom (isCustom = true) sau dacă procedura a fost ștearsă.
+  procedureId String?
+  procedure   Procedure? @relation(fields: [procedureId], references: [id], onDelete: SetNull)
+
+  name     String  // snapshot al numelui procedurii
+  price    Decimal @db.Decimal(10, 2) // snapshot al prețului la momentul creării
+  isCustom Boolean @default(false)
+
+  @@index([ticketId])
+}

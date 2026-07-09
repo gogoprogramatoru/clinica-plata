@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE `Ticket` ADD COLUMN `isInsuredCAS` BOOLEAN NOT NULL DEFAULT false;

@@ -1,0 +1,23 @@
+# Blocul Caddy pentru Clinica Plata.
+#
+# Se adaugă în Caddyfile-ul existent (pe VPS: /opt/n8n/Caddyfile), lângă blocul
+# n8n. Caddy obține și reînnoiește singur certificatul Let's Encrypt.
+#
+# Cerință: subdomeniul trebuie să aibă deja o înregistrare DNS A către IP-ul
+# serverului, altfel provocarea HTTP-01 eșuează și certificatul nu se emite.
+
+nurse-reception.sanmedica.ro {
+	# `clinica-app` este numele containerului, rezolvat prin DNS-ul Docker pe
+	# rețeaua partajată cu Caddy. Portul 3000 nu e publicat pe host.
+	#
+	# Nu e nevoie de configurație pentru WebSocket: Caddy transmite nativ
+	# upgrade-ul de protocol, deci Socket.io funcționează fără setări extra.
+	reverse_proxy clinica-app:3000
+
+	encode gzip zstd
+}
+
+# Notă: header-ele de securitate (CSP cu nonce, HSTS, X-Frame-Options,
+# X-Content-Type-Options, Referrer-Policy) sunt emise de aplicație, în
+# middleware.ts și next.config.mjs. Nu le dublăm aici — Caddy le-ar adăuga
+# a doua oară, iar valori diferite pe același header dau comportament ambiguu.
