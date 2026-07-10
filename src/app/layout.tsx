@@ -26,6 +26,13 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
+// CSP-ul are un nonce generat la fiecare cerere (middleware.ts). Next injectează
+// acel nonce în scripturile sale doar când randează pagina la cerere; o pagină
+// pre-randată la build ar avea scripturi inline FĂRĂ nonce, pe care browserul
+// le-ar bloca — pagina s-ar afișa o clipă, apoi React ar rămâne fără date și ar
+// goli DOM-ul. Aici, în root layout, dezactivăm pre-randarea pentru tot arborele.
+export const dynamic = "force-dynamic";
+
 export default function RootLayout({
   children,
 }: {
