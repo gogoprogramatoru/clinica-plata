@@ -3,39 +3,45 @@ import { getToken } from "next-auth/jwt";
 import type { Role } from "@prisma/client";
 
 import { canAccess, isProtectedPath, ROLE_HOME } from "@/lib/rbac";
+import { isHttpsDeployment } from "@/lib/deployment";
 
-const isProd = process.env.NODE_ENV === "production";
+const isDev = process.env.NODE_ENV !== "production";
 
 /**
  * Construiește un Content-Security-Policy cu nonce. Next.js citește acest
  * header de pe REQUEST și aplică automat nonce-ul pe scripturile sale inline.
+ *
+ * `upgrade-insecure-requests` depinde de protocolul pe care e servită
+ * aplicația, nu de NODE_ENV: pe o instalare locală, în http, ar rescrie
+ * cererile către https://IP și ar rupe toate asset-urile.
  */
-function buildCsp(nonce: string): string {
+function buildCsp(nonce: string, https: boolean): string {
   const directives = [
     `default-src 'self'`,
     // În dev, Next folosește eval pentru HMR.
-    `script-src 'self' 'nonce-${nonce}'${isProd ? "" : " 'unsafe-eval'"}`,
+    `script-src 'self' 'nonce-${nonce}'${isDev ? " 'unsafe-eval'" : ""}`,
     // Stiluri inline necesare pentru Next/styled-jsx; Tailwind e compilat.
     `style-src 'self' 'unsafe-inline'`,
     `img-src 'self' data: blob:`,
     `font-src 'self'`,
     // 'self' acoperă WebSocket-urile same-origin (Socket.io). În dev permitem ws.
-    `connect-src 'self'${isProd ? "" : " ws: wss:"}`,
+    `connect-src 'self'${isDev ? " ws: wss:" : ""}`,
     `object-src 'none'`,
     `base-uri 'self'`,
     `form-action 'self'`,
     `frame-ancestors 'none'`,
-    ...(isProd ? [`upgrade-insecure-requests`] : []),
+    ...(https ? [`upgrade-insecure-requests`] : []),
   ];
   return directives.join("; ");
 }
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+  const https = isHttpsDeployment();
 
   // --- 1. CSP cu nonce ---
   const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
-  const csp = buildCsp(nonce);
+  const csp = buildCsp(nonce, https);
 
   const requestHeaders = new Headers(req.headers);
   requestHeaders.set("x-nonce", nonce);
@@ -45,6 +51,15 @@ export async function middleware(req: NextRequest) {
   const makeResponse = () => {
     const res = NextResponse.next({ request: { headers: requestHeaders } });
     res.headers.set("content-security-policy", csp);
+    // HSTS are sens doar peste HTTPS. Îl setăm aici, la runtime, pentru că
+    // headerele din next.config.mjs sunt fixate la build, când nu se știe încă
+    // pe ce protocol va fi servită instanța.
+    if (https) {
+      res.headers.set(
+        "strict-transport-security",
+        "max-age=63072000; includeSubDomains; preload",
+      );
+    }
     return res;
   };
 
@@ -52,7 +67,9 @@ export async function middleware(req: NextRequest) {
   const token = await getToken({
     req,
     secret: process.env.AUTH_SECRET,
-    secureCookie: isProd,
+    // Trebuie să corespundă prefixului cookie-ului scris de Auth.js, care
+    // depinde de protocolul din AUTH_URL. Vezi src/lib/deployment.ts.
+    secureCookie: https,
   });
   const role = token?.role as Role | undefined;
   const isLoggedIn = Boolean(token);

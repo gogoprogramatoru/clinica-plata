@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
-# Actualizează aplicația pe VPS: aduce codul nou, reconstruiește imaginea și
+# Actualizează aplicația pe server: aduce codul nou, reconstruiește imaginea și
 # repornește containerul. Migrațiile Prisma rulează automat în entrypoint.
 #
-# Utilizare (pe server):  /opt/clinica-plata/scripts/deploy.sh
+# Utilizare:
+#   /opt/clinica-plata/scripts/deploy.sh                       # VPS (Caddy)
+#   COMPOSE_FILE=compose.yaml /opt/stacks/clinica-plata/scripts/deploy.sh
+#                                                              # instalare locală
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-COMPOSE="docker compose -f compose.prod.yml"
+COMPOSE_FILE="${COMPOSE_FILE:-compose.prod.yml}"
+COMPOSE="docker compose -f $COMPOSE_FILE"
+
+echo "▶ Stack: $COMPOSE_FILE"
 
 echo "▶ Aduc ultimele modificări din Git…"
 git pull --ff-only

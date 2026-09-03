@@ -19,6 +19,7 @@ import { getToken } from "next-auth/jwt";
 import { Role } from "@prisma/client";
 
 import { ROOMS } from "./src/types/realtime.js";
+import { isHttpsDeployment } from "./src/lib/deployment.js";
 import type {
   ClientToServerEvents,
   ServerToClientEvents,
@@ -70,7 +71,9 @@ async function main() {
         // socket.request este IncomingMessage-ul cu header-ele (inclusiv cookie).
         req: socket.request as never,
         secret: process.env.AUTH_SECRET,
-        secureCookie: !dev,
+        // Același prefix de cookie pe care îl scrie Auth.js: depinde de
+        // protocolul din AUTH_URL, nu de NODE_ENV (vezi src/lib/deployment.ts).
+        secureCookie: isHttpsDeployment(),
       });
 
       if (!token?.role) {

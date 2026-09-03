@@ -18,7 +18,8 @@ proceduri, prețuri și conturi.
 - [Instalare (dezvoltare)](#instalare-dezvoltare)
 - [Variabile de mediu](#variabile-de-mediu)
 - [Comenzi](#comenzi)
-- [Deployment pe VPS (Hosterion)](#deployment-pe-vps-hosterion)
+- [Instalare locală (Dockge / Proxmox)](#instalare-locală-dockge--proxmox)
+- [Deployment pe VPS (Docker + Caddy)](#deployment-pe-vps-docker--caddy)
 - [Securitate](#securitate)
 - [Testare](#testare)
 - [Structura proiectului](#structura-proiectului)
@@ -77,18 +78,21 @@ nu doar în UI.
 # 1. Dependențe
 npm install
 
-# 2. Variabile de mediu
+# 2. MySQL local (container doar cu baza de date, pe portul 3307)
+docker compose -f compose.dev.yml up -d
+
+# 3. Variabile de mediu
 cp .env.example .env
 #   editează .env — cel puțin DATABASE_URL, AUTH_SECRET, credențialele de seed
 #   generează un secret: openssl rand -base64 32
 
-# 3. Migrare bază de date + client Prisma
+# 4. Migrare bază de date + client Prisma
 npm run prisma:migrate       # creează schema în MySQL (dev)
 
-# 4. Seed (admin + conturi/date demo)
+# 5. Seed (admin + conturi/date demo)
 npm run seed
 
-# 5. Pornire în dev (Next + Socket.io pe :3000)
+# 6. Pornire în dev (Next + Socket.io pe :3000)
 npm run dev
 ```
 
@@ -103,11 +107,26 @@ Vezi [`.env.example`](./.env.example). Rezumat:
 | ------------------------- | ---------------------------------------------------------------- |
 | `DATABASE_URL`            | Conexiune MySQL (`mysql://user:pass@host:3306/db`).              |
 | `AUTH_SECRET`             | Secret pentru JWT/CSRF (`openssl rand -base64 32`).              |
-| `AUTH_URL`                | URL-ul public complet (prod, în spatele nginx).                 |
+| `AUTH_URL`                | Adresa exactă la care se deschide aplicația, fără slash final.   |
 | `AUTH_TRUST_HOST`         | `true` când rulezi în spatele unui reverse proxy.               |
 | `PORT` / `HOSTNAME`       | Portul și adresa de bind ale serverului Node.                   |
+| `APP_PORT`                | Portul publicat pe host de `compose.yaml` (instalare locală).    |
 | `SOCKET_ALLOWED_ORIGINS`  | Origini permise pentru CORS-ul Socket.io (prod).                |
-| `SEED_ADMIN_*` etc.       | Credențiale pentru scriptul de seed.                            |
+| `SEED_ADMIN_*` etc.       | Credențiale pentru scriptul de seed (min. 10 caractere, litere + cifre). |
+
+**`AUTH_URL` decide regimul de securitate**, nu `NODE_ENV` (vezi
+[`src/lib/deployment.ts`](./src/lib/deployment.ts)): pe `https://` sesiunea
+folosește cookie-uri cu prefix `__Secure-`, răspunsurile poartă HSTS, iar CSP-ul
+cere `upgrade-insecure-requests`; pe `http://` — instalarea din rețeaua locală —
+niciuna dintre acestea, fiindcă altfel browserul ar refuza cookie-ul de sesiune
+și login-ul ar intra în buclă. Trebuie să corespundă adresei reale.
+
+Pentru orice instalare, generează fișierul cu parole aleatoare în loc să-l
+completezi manual:
+
+```bash
+scripts/gen-env.sh http://192.168.1.50:3000     # sau https://domeniul-tau
+```
 
 > **Nu comite** niciodată `.env` cu valori reale.
 
@@ -124,6 +143,91 @@ Vezi [`.env.example`](./.env.example). Rezumat:
 | `npm run typecheck`       | Verificare TypeScript.                                    |
 | `npm run lint`            | ESLint.                                                   |
 | `npm test`                | Teste Vitest.                                             |
+| `scripts/gen-env.sh URL`  | Generează `.env` cu parole aleatoare (chmod 600).         |
+| `scripts/seed.sh`         | Seed în stack-ul Docker (o singură dată, la instalare).   |
+| `scripts/deploy.sh`       | Update pe server: `git pull` + rebuild + restart.         |
+
+## Instalare locală (Dockge / Proxmox)
+
+Varianta folosită în clinică: un LXC (sau VM) cu Docker pe Proxmox, aplicația
+accesibilă **doar din rețeaua locală**, fără domeniu și fără certificat.
+
+```
+LAN ──HTTP──► clinica-local-app:3000
+                     │
+              rețea internă (fără port publicat)
+                     ▼
+              clinica-local-mysql:3306
+```
+
+MySQL rulează într-un container separat, în același stack, atașat doar la
+rețeaua internă: nu are port publicat, deci e vizibil exclusiv pentru aplicație.
+Datele stau în volumul `clinica-plata-local_mysql_data`.
+
+### 1. Codul în folderul de stack
+
+```bash
+git clone <repo> /opt/stacks/clinica-plata
+cd /opt/stacks/clinica-plata
+```
+
+Dockge citește stack-urile din `/opt/stacks` (sau din `DOCKGE_STACKS_DIR`) și
+pornește `compose.yaml` din folder — fișierul este deja în repo, nu trebuie
+creat nimic din interfață. Build-ul se face pe server, din sursă, deci folderul
+stack-ului trebuie să fie chiar clona repo-ului.
+
+### 2. `.env` cu parole generate
+
+```bash
+./scripts/gen-env.sh http://192.168.1.50:3000
+```
+
+IP-ul este al LXC-ului cu Docker, nu al nodului Proxmox. Dă-i IP static sau
+rezervare DHCP: adresa intră în `AUTH_URL`, iar dacă se schimbă, sesiunile pică.
+Notează credențialele afișate de script — parolele nu se mai pot citi ulterior.
+Sunt conturi de bootstrap: după primul login, adminul creează conturile reale.
+
+Dacă portul 3000 e ocupat pe server, schimbă în `.env` `APP_PORT` **și** portul
+din `AUTH_URL` / `SOCKET_ALLOWED_ORIGINS`.
+
+### 3. Pornire
+
+Apasă **Deploy** în Dockge, sau din terminalul stack-ului:
+
+```bash
+docker compose up -d --build
+```
+
+Prima pornire durează câteva minute (`npm ci` + build Next în container).
+Migrațiile Prisma se aplică automat la fiecare pornire.
+
+### 4. Seed — o singură dată
+
+```bash
+./scripts/seed.sh
+```
+
+### 5. Actualizări
+
+```bash
+COMPOSE_FILE=compose.yaml ./scripts/deploy.sh
+```
+
+(echivalent cu `git pull` + **Deploy** din Dockge).
+
+### 6. Backup
+
+Snapshot-ul de LXC nu e suficient pentru o bază de date pornită; ia și un dump:
+
+```bash
+docker exec clinica-local-mysql sh -c \
+  'mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" clinica_plata' > backup-$(date +%F).sql
+```
+
+> Traficul este HTTP în clar în LAN: parolele trec necriptat prin switch/WiFi.
+> Acceptabil într-o rețea de încredere; pentru expunere în afara ei, pune
+> aplicația în spatele unui reverse proxy cu TLS și schimbă `AUTH_URL` în
+> `https://…` (restul comportamentului de securitate se aliniază singur).
 
 ## Deployment pe VPS (Docker + Caddy)
 
@@ -152,7 +256,7 @@ poate emite certificatul înainte ca DNS-ul să se propage.
 ```bash
 git clone <repo> /opt/clinica-plata
 cd /opt/clinica-plata
-cp .env.example .env    # completează valorile REALE de producție
+./scripts/gen-env.sh https://subdomeniul-tau    # generează .env cu parole noi
 ```
 
 Setează în `.env`:
@@ -176,8 +280,7 @@ Migrațiile Prisma se aplică automat la fiecare pornire (vezi
 instalare, într-un container temporar care primește și variabilele `SEED_*`:
 
 ```bash
-docker compose -f compose.prod.yml run --rm --env-file .env \
-  --entrypoint npx app tsx prisma/seed.ts
+COMPOSE_FILE=compose.prod.yml ./scripts/seed.sh
 ```
 
 > Rulează **o singură instanță** a aplicației, obligatoriu pentru Socket.io
@@ -231,7 +334,10 @@ MySQL 8 și nginx instalate pe server, iar `.env` trebuie să folosească
 - **Security headers**: `Content-Security-Policy` (cu nonce), `X-Frame-Options`,
   `X-Content-Type-Options`, `Referrer-Policy`, `Strict-Transport-Security`,
   `Permissions-Policy` (vezi `middleware.ts` + `next.config.mjs`).
-- **Cookie-uri** `httpOnly`, `secure` (prod), `sameSite=lax`.
+- **Cookie-uri** `httpOnly`, `sameSite=lax`, `secure` + prefix `__Secure-` când
+  `AUTH_URL` este `https://`. HSTS și `upgrade-insecure-requests` urmează
+  același criteriu, decis la runtime (`src/lib/deployment.ts`), pentru ca
+  aceeași imagine să funcționeze și în spatele HTTPS, și în rețeaua locală.
 - **Fără SQL injection**: exclusiv Prisma parametrizat (fără query raw din input).
 - **Fără XSS**: textul introdus de utilizatori e randat ca text (React escapează);
   nu se folosește `dangerouslySetInnerHTML`.
@@ -269,8 +375,13 @@ src/
     tickets/                  # server actions + queries tichete
     admin/                    # server actions + queries admin
   lib/                        # prisma, password, rbac, rate-limit, realtime, ...
+  lib/deployment.ts           # http vs https (derivat din AUTH_URL)
   types/                      # tipuri partajate (realtime, next-auth)
 tests/                        # Vitest
+compose.yaml                  # stack pentru instalarea locală (LAN, fără proxy)
+compose.prod.yml              # stack pentru VPS, în spatele Caddy
+compose.dev.yml               # doar MySQL, pentru development
+scripts/                      # gen-env.sh, seed.sh, deploy.sh
 docs/nginx.conf.example       # exemplu reverse proxy
 ecosystem.config.cjs          # configurație pm2
 ```

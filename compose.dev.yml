@@ -1,7 +1,12 @@
 # MySQL pentru development local. NU e pentru producție.
-# Pornire:  docker compose up -d
-# Oprire:   docker compose down        (păstrează datele)
-# Reset:    docker compose down -v      (șterge datele)
+#
+# Fișier numit explicit (nu `docker-compose.yml`) ca `docker compose` să nu-l
+# pornească din greșeală: `compose.yaml` din rădăcină este stack-ul complet
+# pentru instalarea locală din clinică.
+#
+# Pornire:  docker compose -f compose.dev.yml up -d
+# Oprire:   docker compose -f compose.dev.yml down        (păstrează datele)
+# Reset:    docker compose -f compose.dev.yml down -v      (șterge datele)
 services:
   db:
     image: mysql:8

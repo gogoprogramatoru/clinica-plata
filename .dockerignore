@@ -9,4 +9,7 @@ logs
 coverage
 *.tsbuildinfo
 .DS_Store
-docker-compose.yml
+compose.dev.yml
+compose.yaml
+compose.prod.yml
+docs

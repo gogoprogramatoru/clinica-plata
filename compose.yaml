@@ -1,0 +1,75 @@
+# Stack complet pentru instalarea LOCALĂ (rețeaua clinicii): aplicația + MySQL,
+# fără reverse proxy și fără expunere pe internet. Este fișierul implicit al
+# proiectului, ca un manager de stack-uri (Dockge, Portainer) să-l poată porni
+# fără parametri suplimentari.
+#
+#   docker compose up -d --build
+#
+# Diferențe față de `compose.prod.yml` (VPS, în spatele Caddy):
+#   - portul 3000 este publicat pe host, ca aplicația să fie accesibilă direct
+#     din LAN (http://IP_SERVER:3000); pe VPS singura cale e prin Caddy;
+#   - nu există rețeaua externă `n8n_internal` a lui Caddy;
+#   - nume de proiect, containere și volum distincte, ca cele două stack-uri să
+#     nu se calce niciodată în picioare dacă ajung pe același host.
+#
+# MySQL rulează într-un container separat, atașat DOAR la rețeaua internă:
+# nu are port publicat, deci nu e accesibil din rețea, ci doar de aplicație.
+# Datele stau în volumul `mysql_data`.
+
+name: clinica-plata-local
+
+services:
+  db:
+    image: mysql:8.0
+    container_name: clinica-local-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?lipsește MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?lipsește MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER:?lipsește MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?lipsește MYSQL_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - internal
+
+  app:
+    build:
+      context: .
+    image: clinica-plata:latest
+    container_name: clinica-local-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    # Variabile explicite (nu `env_file`): containerul aplicației nu trebuie să
+    # primească parola de root a bazei de date sau credențialele de seed.
+    # Valorile vin din `.env`, citit automat de Docker Compose.
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:?lipsește DATABASE_URL}
+      AUTH_SECRET: ${AUTH_SECRET:?lipsește AUTH_SECRET}
+      # http://IP_SERVER:3000 pentru instalarea locală. Prefixul cookie-ului de
+      # sesiune și HSTS/CSP se aleg după acest protocol (src/lib/deployment.ts).
+      AUTH_URL: ${AUTH_URL:?lipsește AUTH_URL}
+      AUTH_TRUST_HOST: "true"
+      SOCKET_ALLOWED_ORIGINS: ${SOCKET_ALLOWED_ORIGINS:?lipsește SOCKET_ALLOWED_ORIGINS}
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  mysql_data:

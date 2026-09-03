@@ -29,13 +29,32 @@ function requireEnv(name: string): string {
   return value;
 }
 
+/**
+ * Aceeași politică de parole ca la crearea conturilor din interfața de admin
+ * (src/lib/validation/admin.ts). Seed-ul creează conturi reale, deci nu are
+ * voie să accepte parolele-exemplu din `.env.example`; `scripts/gen-env.sh`
+ * generează valori care trec această verificare.
+ */
+function requirePassword(name: string): string {
+  const value = requireEnv(name);
+  const strong =
+    value.length >= 10 && /[A-Za-z]/.test(value) && /[0-9]/.test(value);
+  if (!strong) {
+    throw new Error(
+      `${name} trebuie să aibă minim 10 caractere și să conțină litere și cifre. ` +
+        `Generează un .env cu scripts/gen-env.sh.`,
+    );
+  }
+  return value;
+}
+
 async function main() {
   const adminUsername = requireEnv("SEED_ADMIN_USERNAME");
-  const adminPassword = requireEnv("SEED_ADMIN_PASSWORD");
+  const adminPassword = requirePassword("SEED_ADMIN_PASSWORD");
   const receptionUsername = requireEnv("SEED_RECEPTION_USERNAME");
-  const receptionPassword = requireEnv("SEED_RECEPTION_PASSWORD");
+  const receptionPassword = requirePassword("SEED_RECEPTION_PASSWORD");
   const nurseUsername = requireEnv("SEED_NURSE_USERNAME");
-  const nursePassword = requireEnv("SEED_NURSE_PASSWORD");
+  const nursePassword = requirePassword("SEED_NURSE_PASSWORD");
 
   // --- Specialități ---
   const cardio = await prisma.specialty.upsert({
